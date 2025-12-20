@@ -135,12 +135,11 @@ public sealed class NotificationWorker : BackgroundService
         string correlationId,
         bool isRetryable)
     {
-        var nextAttempt = attemptNo + 1;
-        var reachedLimit = nextAttempt > _workerOptions.MaxAttempts;
-
         await CompleteAttemptAsync(message.NotificationId, attemptNo, "Failed", error, CancellationToken.None);
 
-        if (isRetryable && !reachedLimit)
+        var decision = RetryDecider.Decide(isRetryable, attemptNo, _workerOptions.MaxAttempts);
+
+        if (decision.Action == RetryAction.Retry)
         {
             await UpdateStatusAsync(message.NotificationId, NotificationStatus.RetryScheduled, error, CancellationToken.None);
             _publisher.PublishToRetry(new NotificationDispatchMessage
@@ -151,17 +150,19 @@ public sealed class NotificationWorker : BackgroundService
                 Text = message.Text,
                 AttachmentIds = message.AttachmentIds,
                 CorrelationId = message.CorrelationId,
-                Attempt = nextAttempt
+                Attempt = decision.NextAttempt
             });
             _logger.LogWarning(
                 "Retry scheduled {NotificationId} Attempt {Attempt} {CorrelationId}",
                 message.NotificationId,
-                nextAttempt,
+                decision.NextAttempt,
                 correlationId);
             return;
         }
 
-        var terminalStatus = isRetryable ? NotificationStatus.Dead : NotificationStatus.Failed;
+        var terminalStatus = decision.Action == RetryAction.Dead
+            ? NotificationStatus.Dead
+            : NotificationStatus.Failed;
         await UpdateStatusAsync(message.NotificationId, terminalStatus, error, CancellationToken.None);
         _publisher.PublishToDead(message);
         _logger.LogWarning(
