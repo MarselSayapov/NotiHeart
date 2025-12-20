@@ -1,4 +1,4 @@
-namespace NotiHeart.Worker.Messaging;
+namespace EmailWorker.Messaging;
 
 public sealed class RabbitMqOptions
 {

@@ -1,14 +1,15 @@
 using System.Text;
 using System.Text.Json;
+using EmailWorker.Data;
+using EmailWorker.Email;
+using EmailWorker.Messaging;
+using EmailWorker.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using NotiHeart.Worker.Data;
-using NotiHeart.Worker.Messaging;
-using NotiHeart.Worker.Models;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
-namespace NotiHeart.Worker;
+namespace EmailWorker;
 
 public sealed class NotificationWorker : BackgroundService
 {
@@ -16,6 +17,7 @@ public sealed class NotificationWorker : BackgroundService
     private readonly RabbitMqOptions _rabbitOptions;
     private readonly WorkerOptions _workerOptions;
     private readonly NotificationPublisher _publisher;
+    private readonly IEmailSender _emailSender;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<NotificationWorker> _logger;
     private IModel? _channel;
@@ -25,6 +27,7 @@ public sealed class NotificationWorker : BackgroundService
         IOptions<RabbitMqOptions> rabbitOptions,
         IOptions<WorkerOptions> workerOptions,
         NotificationPublisher publisher,
+        IEmailSender emailSender,
         IServiceScopeFactory scopeFactory,
         ILogger<NotificationWorker> logger)
     {
@@ -32,6 +35,7 @@ public sealed class NotificationWorker : BackgroundService
         _rabbitOptions = rabbitOptions.Value;
         _workerOptions = workerOptions.Value;
         _publisher = publisher;
+        _emailSender = emailSender;
         _scopeFactory = scopeFactory;
         _logger = logger;
     }
@@ -65,8 +69,7 @@ public sealed class NotificationWorker : BackgroundService
         consumer.Received += OnMessageReceivedAsync;
         _channel.BasicConsume(_rabbitOptions.QueueName, autoAck: false, consumer);
 
-        _logger.LogInformation("Worker started for channel {Channel} on queue {Queue}",
-            _workerOptions.Channel, _rabbitOptions.QueueName);
+        _logger.LogInformation("Email worker started on queue {Queue}", _rabbitOptions.QueueName);
 
         return Task.CompletedTask;
     }
@@ -89,28 +92,39 @@ public sealed class NotificationWorker : BackgroundService
             await UpdateStatusAsync(message.NotificationId, NotificationStatus.Sending, null, CancellationToken.None);
             await InsertAttemptAsync(message.NotificationId, attemptNo, "Started", null, CancellationToken.None);
 
-            var success = await SendMockAsync(message, CancellationToken.None);
-
-            if (success)
+            var attachments = await LoadAttachmentsAsync(message.AttachmentIds, CancellationToken.None);
+            var emailAttachments = attachments.Select(a => new EmailAttachment
             {
-                await UpdateStatusAsync(message.NotificationId, NotificationStatus.Sent, null, CancellationToken.None);
-                await CompleteAttemptAsync(message.NotificationId, attemptNo, "Sent", null, CancellationToken.None);
-                _channel?.BasicAck(args.DeliveryTag, false);
-                _logger.LogInformation("Notification sent {NotificationId} {CorrelationId}",
-                    message.NotificationId, correlationId);
-                return;
-            }
+                FileName = a.FileName,
+                ContentType = a.ContentType,
+                Content = a.Content,
+                Size = a.Size
+            }).ToList();
 
-            await HandleFailureAsync(message, attemptNo, "Mock send failed", correlationId, !_workerOptions.MockPermanentFailure);
+            await _emailSender.SendAsync(message.Recipient, message.Text, emailAttachments, CancellationToken.None);
+
+            await UpdateStatusAsync(message.NotificationId, NotificationStatus.Sent, null, CancellationToken.None);
+            await CompleteAttemptAsync(message.NotificationId, attemptNo, "Sent", null, CancellationToken.None);
+            _channel?.BasicAck(args.DeliveryTag, false);
+            _logger.LogInformation(
+                "Notification sent {NotificationId} {CorrelationId}",
+                message.NotificationId,
+                correlationId);
+        }
+        catch (TemporaryEmailException ex) when (message is not null)
+        {
+            await HandleFailureAsync(message, GetAttemptNumber(message, args.BasicProperties?.Headers), ex.Message, correlationId, isRetryable: true);
+            _channel?.BasicAck(args.DeliveryTag, false);
+        }
+        catch (Exception ex) when (message is not null)
+        {
+            await HandleFailureAsync(message, GetAttemptNumber(message, args.BasicProperties?.Headers), ex.Message, correlationId, isRetryable: false);
             _channel?.BasicAck(args.DeliveryTag, false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed processing message {CorrelationId}", correlationId);
-            if (_channel is not null)
-            {
-                _channel.BasicNack(args.DeliveryTag, false, requeue: true);
-            }
+            _channel?.BasicNack(args.DeliveryTag, false, requeue: true);
         }
     }
 
@@ -139,45 +153,37 @@ public sealed class NotificationWorker : BackgroundService
                 CorrelationId = message.CorrelationId,
                 Attempt = nextAttempt
             });
-            _logger.LogWarning("Retry scheduled {NotificationId} Attempt {Attempt} {CorrelationId}",
-                message.NotificationId, nextAttempt, correlationId);
+            _logger.LogWarning(
+                "Retry scheduled {NotificationId} Attempt {Attempt} {CorrelationId}",
+                message.NotificationId,
+                nextAttempt,
+                correlationId);
             return;
         }
 
         var terminalStatus = isRetryable ? NotificationStatus.Dead : NotificationStatus.Failed;
         await UpdateStatusAsync(message.NotificationId, terminalStatus, error, CancellationToken.None);
         _publisher.PublishToDead(message);
-        _logger.LogWarning("Notification dead-lettered {NotificationId} {CorrelationId}",
-            message.NotificationId, correlationId);
+        _logger.LogWarning(
+            "Notification dead-lettered {NotificationId} {CorrelationId}",
+            message.NotificationId,
+            correlationId);
     }
 
-    private static int GetAttemptNumber(NotificationDispatchMessage message, IDictionary<string, object>? headers)
+    private async Task<List<Models.NotificationAttachment>> LoadAttachmentsAsync(Guid[] attachmentIds, CancellationToken cancellationToken)
     {
-        if (message.Attempt > 0)
+        if (attachmentIds.Length == 0)
         {
-            return message.Attempt;
+            return [];
         }
 
-        if (headers is not null && headers.TryGetValue("x-attempt", out var headerValue))
-        {
-            if (headerValue is byte[] bytes && int.TryParse(Encoding.UTF8.GetString(bytes), out var parsed))
-            {
-                return parsed;
-            }
+        using var scope = _scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
 
-            if (headerValue is int intValue)
-            {
-                return intValue;
-            }
-        }
-
-        return 1;
-    }
-
-    private async Task<bool> SendMockAsync(NotificationDispatchMessage message, CancellationToken cancellationToken)
-    {
-        await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken);
-        return !_workerOptions.MockAlwaysFail;
+        return await dbContext.NotificationAttachments
+            .AsNoTracking()
+            .Where(a => attachmentIds.Contains(a.Id))
+            .ToListAsync(cancellationToken);
     }
 
     private async Task UpdateStatusAsync(
@@ -189,7 +195,8 @@ public sealed class NotificationWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
 
-        var notification = await dbContext.Notifications.FirstOrDefaultAsync(n => n.Id == notificationId, cancellationToken);
+        var notification = await dbContext.Notifications
+            .FirstOrDefaultAsync(n => n.Id == notificationId, cancellationToken);
         if (notification is null)
         {
             return;
@@ -248,6 +255,29 @@ public sealed class NotificationWorker : BackgroundService
         attempt.Result = result;
         attempt.Error = error;
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static int GetAttemptNumber(NotificationDispatchMessage message, IDictionary<string, object>? headers)
+    {
+        if (message.Attempt > 0)
+        {
+            return message.Attempt;
+        }
+
+        if (headers is not null && headers.TryGetValue("x-attempt", out var headerValue))
+        {
+            if (headerValue is byte[] bytes && int.TryParse(Encoding.UTF8.GetString(bytes), out var parsed))
+            {
+                return parsed;
+            }
+
+            if (headerValue is int intValue)
+            {
+                return intValue;
+            }
+        }
+
+        return 1;
     }
 
     public override void Dispose()

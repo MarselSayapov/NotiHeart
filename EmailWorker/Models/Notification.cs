@@ -1,4 +1,4 @@
-namespace NotiHeart.Worker.Models;
+namespace EmailWorker.Models;
 
 public sealed class Notification
 {

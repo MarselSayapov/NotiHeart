@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 
-namespace NotiHeart.Worker.Messaging;
+namespace EmailWorker.Messaging;
 
 public sealed class RabbitMqConnection : IDisposable
 {

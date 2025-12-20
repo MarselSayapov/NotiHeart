@@ -1,10 +1,10 @@
 using System.Text;
 using System.Text.Json;
+using EmailWorker.Models;
 using Microsoft.Extensions.Options;
-using NotiHeart.Worker.Models;
 using RabbitMQ.Client;
 
-namespace NotiHeart.Worker.Messaging;
+namespace EmailWorker.Messaging;
 
 public sealed class NotificationPublisher
 {

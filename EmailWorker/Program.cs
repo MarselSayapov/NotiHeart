@@ -1,7 +1,8 @@
+using EmailWorker;
+using EmailWorker.Data;
+using EmailWorker.Email;
+using EmailWorker.Messaging;
 using Microsoft.EntityFrameworkCore;
-using NotiHeart.Worker;
-using NotiHeart.Worker.Data;
-using NotiHeart.Worker.Messaging;
 using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -10,6 +11,7 @@ builder.Services.AddHostedService<NotificationWorker>();
 
 builder.Services.Configure<RabbitMqOptions>(builder.Configuration.GetSection("RabbitMq"));
 builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Worker"));
+builder.Services.Configure<EmailSenderOptions>(builder.Configuration.GetSection("EmailSender"));
 
 builder.Services.AddDbContext<NotificationDbContext>(options =>
 {
@@ -19,6 +21,7 @@ builder.Services.AddDbContext<NotificationDbContext>(options =>
 
 builder.Services.AddSingleton<RabbitMqConnection>();
 builder.Services.AddSingleton<NotificationPublisher>();
+builder.Services.AddSingleton<IEmailSender, FakeEmailSender>();
 
 builder.Services.AddSerilog((context, loggerConfiguration) =>
 {
