@@ -1,7 +1,100 @@
-﻿services:
-  notiheart:
-    image: notiheart
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: notiheart
+      POSTGRES_PASSWORD: notiheart
+      POSTGRES_DB: notiheart
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notiheart -d notiheart"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gateway:
     build:
       context: .
-      dockerfile: NotiHeart/Dockerfile
+      dockerfile: src/NotiHeart.Gateway/Dockerfile
+    ports:
+      - "5000:8080"
+    environment:
+      ConnectionStrings__Notifications: Host=postgres;Port=5432;Database=notiheart;Username=notiheart;Password=notiheart
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: guest
+      RabbitMq__Password: guest
+      RabbitMq__Exchange: notifications.dispatch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/notifications/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  emailworker:
+    build:
+      context: .
+      dockerfile: src/NotiHeart.EmailWorker/Dockerfile
+    environment:
+      ConnectionStrings__Notifications: Host=postgres;Port=5432;Database=notiheart;Username=notiheart;Password=notiheart
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: guest
+      RabbitMq__Password: guest
+      RabbitMq__Exchange: notifications.dispatch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  smsworker:
+    build:
+      context: .
+      dockerfile: src/NotiHeart.SmsWorker/Dockerfile
+    environment:
+      ConnectionStrings__Notifications: Host=postgres;Port=5432;Database=notiheart;Username=notiheart;Password=notiheart
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: guest
+      RabbitMq__Password: guest
+      RabbitMq__Exchange: notifications.dispatch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  pushworker:
+    build:
+      context: .
+      dockerfile: src/NotiHeart.PushWorker/Dockerfile
+    environment:
+      ConnectionStrings__Notifications: Host=postgres;Port=5432;Database=notiheart;Username=notiheart;Password=notiheart
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: guest
+      RabbitMq__Password: guest
+      RabbitMq__Exchange: notifications.dispatch
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
