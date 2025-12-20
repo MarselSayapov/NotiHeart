@@ -42,5 +42,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapGet("/api/notifications/health", () => Results.Ok("OK"));
 
 app.Run();

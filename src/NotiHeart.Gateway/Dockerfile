@@ -7,5 +7,8 @@ RUN dotnet publish "src/NotiHeart.Gateway/NotiHeart.Gateway.csproj" -c Release -
 FROM mcr.microsoft.com/dotnet/aspnet:9.0
 WORKDIR /app
 COPY --from=build /app/publish .
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 ENV ASPNETCORE_URLS=http://+:8080
 ENTRYPOINT ["dotnet", "NotiHeart.Gateway.dll"]
