@@ -1,0 +1,7 @@
+﻿services:
+  notiheart:
+    image: notiheart
+    build:
+      context: .
+      dockerfile: NotiHeart/Dockerfile
+
