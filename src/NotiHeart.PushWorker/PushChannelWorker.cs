@@ -8,22 +8,25 @@ namespace NotiHeart.PushWorker;
 
 public sealed class PushChannelWorker : ChannelWorkerBase
 {
+    private readonly IPushSender _pushSender;
+
     public PushChannelWorker(
         IOptions<RabbitMqOptions> rabbitOptions,
         IOptions<NotificationProcessingOptions> processingOptions,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        IPushSender pushSender)
         : base(NotificationChannel.Push, rabbitOptions, processingOptions, scopeFactory, Log.Logger.ForContext<PushChannelWorker>())
     {
+        _pushSender = pushSender;
     }
 
-    protected override Task<SendResult> SendAsync(
+    protected override async Task<SendResult> SendAsync(
         Notification notification,
         IReadOnlyCollection<NotificationAttachment> attachments,
         CancellationToken cancellationToken)
     {
-        var shouldFail = notification.Recipient.Contains("fail", StringComparison.OrdinalIgnoreCase);
-        return Task.FromResult(shouldFail
-            ? SendResult.Fail("Mock push failure", "Transient")
-            : SendResult.Ok());
+        var attachmentNames = attachments.Select(item => item.FileName).ToArray();
+        var success = await _pushSender.SendAsync(notification.Recipient, notification.Text, attachmentNames, cancellationToken);
+        return success ? SendResult.Ok() : SendResult.Fail("Temporary push failure", "Transient");
     }
 }
