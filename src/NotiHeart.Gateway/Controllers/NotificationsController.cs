@@ -26,7 +26,7 @@ public sealed class NotificationsController : ControllerBase
         _logger = logger;
     }
 
-    [HttpPost]
+    [HttpPost("send")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(NotificationAcceptedResponse), StatusCodes.Status202Accepted)]
     public async Task<ActionResult<NotificationAcceptedResponse>> Create(
@@ -34,7 +34,9 @@ public sealed class NotificationsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var notificationId = Guid.NewGuid();
-        var correlationId = Guid.NewGuid().ToString("N");
+        var correlationId = string.IsNullOrWhiteSpace(request.CorrelationId)
+            ? Guid.NewGuid().ToString("N")
+            : request.CorrelationId.Trim();
         var now = DateTimeOffset.UtcNow;
         var metadata = request.Metadata is null ? null : JsonSerializer.Serialize(request.Metadata);
 
@@ -110,11 +112,12 @@ public sealed class NotificationsController : ControllerBase
     }
 
     [HttpGet("{id:guid}")]
-    [ProducesResponseType(typeof(NotificationSummaryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(NotificationDetailsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<NotificationSummaryResponse>> GetById(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<NotificationDetailsResponse>> GetById(Guid id, CancellationToken cancellationToken)
     {
         var notification = await _dbContext.Notifications
+            .Include(item => item.Attempts)
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, cancellationToken);
 
@@ -123,12 +126,26 @@ public sealed class NotificationsController : ControllerBase
             return NotFound();
         }
 
-        return Ok(new NotificationSummaryResponse(
+        var attempts = notification.Attempts
+            .OrderBy(attempt => attempt.AttemptNo)
+            .Select(attempt => new NotificationAttemptResponse(
+                attempt.AttemptNo,
+                attempt.Result,
+                attempt.StartedAt,
+                attempt.FinishedAt,
+                attempt.Error))
+            .ToArray();
+
+        return Ok(new NotificationDetailsResponse(
             notification.Id,
             notification.CorrelationId,
             notification.Channel,
+            notification.Recipient,
+            notification.Text,
             notification.Status,
+            notification.LastError,
             notification.CreatedAt,
-            notification.UpdatedAt));
+            notification.UpdatedAt,
+            attempts));
     }
 }

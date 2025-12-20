@@ -17,6 +17,8 @@ public sealed class SendNotificationRequest
     [MinLength(1)]
     public string Text { get; init; } = string.Empty;
 
+    public string? CorrelationId { get; init; }
+
     public Dictionary<string, string>? Metadata { get; init; }
 
     public IReadOnlyCollection<IFormFile>? Attachments { get; init; }
