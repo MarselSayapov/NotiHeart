@@ -16,4 +16,6 @@ public sealed class NotificationRequest
     public string Message { get; init; } = string.Empty;
 
     public Dictionary<string, string>? Metadata { get; init; }
+
+    public IReadOnlyCollection<NotificationAttachmentRequest>? Attachments { get; init; }
 }

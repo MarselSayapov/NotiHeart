@@ -1,34 +1,26 @@
 using Microsoft.EntityFrameworkCore;
 using NotiHeart.Contracts;
-using NotiHeart.Gateway.Services;
+using NotiHeart.EmailWorker;
 using NotiHeart.Persistence;
 
-var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddControllers();
-builder.Services.AddOpenApi();
+var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.Configure<RabbitMqOptions>(
     builder.Configuration.GetSection(RabbitMqOptions.SectionName));
+builder.Services.Configure<NotificationProcessingOptions>(
+    builder.Configuration.GetSection(NotificationProcessingOptions.SectionName));
 
 builder.Services.AddDbContext<NotificationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Notifications")));
 
-builder.Services.AddSingleton<INotificationPublisher, RabbitMqNotificationPublisher>();
+builder.Services.AddHostedService<EmailChannelWorker>();
 
-var app = builder.Build();
+var host = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+using (var scope = host.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
     dbContext.Database.EnsureCreated();
 }
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
-app.MapControllers();
-
-app.Run();
+host.Run();

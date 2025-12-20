@@ -3,7 +3,8 @@ namespace NotiHeart.Contracts;
 public enum NotificationStatus
 {
     Pending,
-    Dispatched,
+    Processing,
     Delivered,
+    Retrying,
     Failed
 }

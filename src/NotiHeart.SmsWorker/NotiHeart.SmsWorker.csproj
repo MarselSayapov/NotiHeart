@@ -7,5 +7,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NotiHeart.Contracts\NotiHeart.Contracts.csproj" />
+    <ProjectReference Include="..\NotiHeart.Persistence\NotiHeart.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RabbitMQ.Client" Version="7.0.0" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.2" />
   </ItemGroup>
 </Project>

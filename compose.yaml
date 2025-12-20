@@ -1,7 +1,49 @@
-﻿services:
-  notiheart:
-    image: notiheart
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: notiheart
+      POSTGRES_PASSWORD: notiheart
+      POSTGRES_DB: notiheart
+    ports:
+      - "5432:5432"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  gateway:
     build:
       context: .
-      dockerfile: NotiHeart/Dockerfile
+      dockerfile: src/NotiHeart.Gateway/Dockerfile
+    ports:
+      - "5000:8080"
+    depends_on:
+      - postgres
+      - rabbitmq
 
+  email-worker:
+    build:
+      context: .
+      dockerfile: src/NotiHeart.EmailWorker/Dockerfile
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  sms-worker:
+    build:
+      context: .
+      dockerfile: src/NotiHeart.SmsWorker/Dockerfile
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  push-worker:
+    build:
+      context: .
+      dockerfile: src/NotiHeart.PushWorker/Dockerfile
+    depends_on:
+      - postgres
+      - rabbitmq
