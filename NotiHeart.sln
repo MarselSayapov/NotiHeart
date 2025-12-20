@@ -4,6 +4,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NotiHeart", "NotiHeart\Noti
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EmailWorker", "EmailWorker\\EmailWorker.csproj", "{E5DA2D70-C77D-4E0E-B494-2F0F9EBED2F5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmsWorker", "SmsWorker\\SmsWorker.csproj", "{4E8E9C7E-5E0F-4E7F-9D08-3B5FBA9E1C9A}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{1A0DF331-00F1-4B57-A1F2-288B706C834E}"
 	ProjectSection(SolutionItems) = preProject
 		compose.yaml = compose.yaml
@@ -23,5 +25,9 @@ Global
 		{E5DA2D70-C77D-4E0E-B494-2F0F9EBED2F5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E5DA2D70-C77D-4E0E-B494-2F0F9EBED2F5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E5DA2D70-C77D-4E0E-B494-2F0F9EBED2F5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4E8E9C7E-5E0F-4E7F-9D08-3B5FBA9E1C9A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4E8E9C7E-5E0F-4E7F-9D08-3B5FBA9E1C9A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4E8E9C7E-5E0F-4E7F-9D08-3B5FBA9E1C9A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4E8E9C7E-5E0F-4E7F-9D08-3B5FBA9E1C9A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
