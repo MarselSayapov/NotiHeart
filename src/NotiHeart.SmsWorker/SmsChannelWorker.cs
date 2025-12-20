@@ -16,6 +16,10 @@ public sealed class SmsChannelWorker : BackgroundService, IDisposable
     private readonly IConnection _connection;
     private readonly IChannel _channel;
     private readonly string _queueName;
+    private readonly string _retryQueueName;
+    private readonly string _deadLetterQueueName;
+    private readonly string _deadLetterExchange;
+    private readonly string _routingKey;
 
     public SmsChannelWorker(
         IOptions<RabbitMqOptions> rabbitOptions,
@@ -39,10 +43,36 @@ public sealed class SmsChannelWorker : BackgroundService, IDisposable
         _connection = factory.CreateConnection();
         _channel = _connection.CreateChannel();
 
-        _channel.ExchangeDeclare(_rabbitOptions.Exchange, ExchangeType.Direct, durable: true, autoDelete: false);
+        _routingKey = NotificationRouting.GetRoutingKey(NotificationChannel.Sms);
         _queueName = NotificationRouting.GetQueueName(NotificationChannel.Sms);
-        _channel.QueueDeclare(_queueName, durable: true, exclusive: false, autoDelete: false);
-        _channel.QueueBind(_queueName, _rabbitOptions.Exchange, NotificationRouting.GetRoutingKey(NotificationChannel.Sms));
+        _retryQueueName = NotificationRouting.GetRetryQueueName(NotificationChannel.Sms);
+        _deadLetterQueueName = NotificationRouting.GetDeadLetterQueueName(NotificationChannel.Sms);
+        _deadLetterExchange = NotificationRouting.GetDeadLetterExchange(NotificationChannel.Sms);
+
+        DeclareTopology();
+    }
+
+    private void DeclareTopology()
+    {
+        _channel.ExchangeDeclare(_rabbitOptions.Exchange, ExchangeType.Direct, durable: true, autoDelete: false);
+        _channel.ExchangeDeclare(_deadLetterExchange, ExchangeType.Direct, durable: true, autoDelete: false);
+
+        _channel.QueueDeclare(_deadLetterQueueName, durable: true, exclusive: false, autoDelete: false);
+        _channel.QueueBind(_deadLetterQueueName, _deadLetterExchange, _routingKey);
+
+        _channel.QueueDeclare(_queueName, durable: true, exclusive: false, autoDelete: false, arguments: new Dictionary<string, object>
+        {
+            ["x-dead-letter-exchange"] = _deadLetterExchange,
+            ["x-dead-letter-routing-key"] = _routingKey
+        });
+        _channel.QueueBind(_queueName, _rabbitOptions.Exchange, _routingKey);
+
+        _channel.QueueDeclare(_retryQueueName, durable: true, exclusive: false, autoDelete: false, arguments: new Dictionary<string, object>
+        {
+            ["x-message-ttl"] = _processingOptions.RetryDelaySeconds * 1000,
+            ["x-dead-letter-exchange"] = _rabbitOptions.Exchange,
+            ["x-dead-letter-routing-key"] = _routingKey
+        });
     }
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
@@ -117,12 +147,13 @@ public sealed class SmsChannelWorker : BackgroundService, IDisposable
             {
                 notification.Status = NotificationStatus.RetryScheduled;
                 notification.UpdatedAt = DateTimeOffset.UtcNow;
-                await ScheduleRetryAsync(message, cancellationToken);
+                await ScheduleRetryAsync(message, cancellationToken, "Transient");
             }
             else
             {
                 notification.Status = NotificationStatus.Dead;
                 notification.UpdatedAt = DateTimeOffset.UtcNow;
+                await PublishToDeadLetterQueueAsync(message, "MaxAttemptsExceeded");
             }
         }
 
@@ -140,20 +171,48 @@ public sealed class SmsChannelWorker : BackgroundService, IDisposable
         _channel.BasicAck(args.DeliveryTag, multiple: false);
     }
 
-    private async Task ScheduleRetryAsync(NotificationDispatchMessage message, CancellationToken cancellationToken)
+    private async Task ScheduleRetryAsync(NotificationDispatchMessage message, CancellationToken cancellationToken, string errorType)
     {
         await Task.Delay(TimeSpan.FromSeconds(_processingOptions.RetryDelaySeconds), cancellationToken);
 
         var retryMessage = message with { Attempt = message.Attempt + 1 };
         var payload = JsonSerializer.SerializeToUtf8Bytes(retryMessage);
-        var properties = new BasicProperties { DeliveryMode = DeliveryModes.Persistent };
+        var properties = BuildProperties(retryMessage, errorType);
 
         _channel.BasicPublish(
-            exchange: _rabbitOptions.Exchange,
-            routingKey: NotificationRouting.GetRoutingKey(retryMessage.Channel),
+            exchange: string.Empty,
+            routingKey: _retryQueueName,
             mandatory: false,
             basicProperties: properties,
             body: payload);
+    }
+
+    private Task PublishToDeadLetterQueueAsync(NotificationDispatchMessage message, string errorType)
+    {
+        var payload = JsonSerializer.SerializeToUtf8Bytes(message);
+        var properties = BuildProperties(message, errorType);
+        _channel.BasicPublish(
+            exchange: _deadLetterExchange,
+            routingKey: _routingKey,
+            mandatory: false,
+            basicProperties: properties,
+            body: payload);
+        return Task.CompletedTask;
+    }
+
+    private BasicProperties BuildProperties(NotificationDispatchMessage message, string errorType)
+    {
+        return new BasicProperties
+        {
+            DeliveryMode = DeliveryModes.Persistent,
+            Headers = new Dictionary<string, object>
+            {
+                ["x-attempt"] = message.Attempt,
+                ["x-correlation-id"] = message.CorrelationId,
+                ["x-notification-id"] = message.NotificationId.ToString(),
+                ["x-error-type"] = errorType
+            }
+        };
     }
 
     public void Dispose()

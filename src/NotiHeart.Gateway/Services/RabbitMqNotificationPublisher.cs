@@ -32,7 +32,13 @@ public sealed class RabbitMqNotificationPublisher : INotificationPublisher, IDis
         var payload = JsonSerializer.SerializeToUtf8Bytes(dispatchMessage);
         var properties = new BasicProperties
         {
-            DeliveryMode = DeliveryModes.Persistent
+            DeliveryMode = DeliveryModes.Persistent,
+            Headers = new Dictionary<string, object>
+            {
+                ["x-attempt"] = dispatchMessage.Attempt,
+                ["x-correlation-id"] = dispatchMessage.CorrelationId,
+                ["x-notification-id"] = dispatchMessage.NotificationId.ToString()
+            }
         };
 
         _channel.BasicPublish(
