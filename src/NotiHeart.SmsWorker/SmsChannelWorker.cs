@@ -8,22 +8,42 @@ namespace NotiHeart.SmsWorker;
 
 public sealed class SmsChannelWorker : ChannelWorkerBase
 {
+    private readonly ISmsSender _smsSender;
+    private readonly ILogger<SmsChannelWorker> _logger;
+
     public SmsChannelWorker(
         IOptions<RabbitMqOptions> rabbitOptions,
         IOptions<NotificationProcessingOptions> processingOptions,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        ISmsSender smsSender,
+        ILogger<SmsChannelWorker> logger)
         : base(NotificationChannel.Sms, rabbitOptions, processingOptions, scopeFactory, Log.Logger.ForContext<SmsChannelWorker>())
     {
+        _smsSender = smsSender;
+        _logger = logger;
     }
 
-    protected override Task<SendResult> SendAsync(
+    protected override async Task<SendResult> SendAsync(
         Notification notification,
         IReadOnlyCollection<NotificationAttachment> attachments,
         CancellationToken cancellationToken)
     {
-        var shouldFail = notification.Recipient.Contains("fail", StringComparison.OrdinalIgnoreCase);
-        return Task.FromResult(shouldFail
-            ? SendResult.Fail("Mock SMS failure", "Transient")
-            : SendResult.Ok());
+        if (attachments.Count > 0)
+        {
+            _logger.LogWarning("SMS ignores {AttachmentCount} attachments for notification {NotificationId}.",
+                attachments.Count,
+                notification.Id);
+        }
+
+        var result = await _smsSender.SendAsync(notification.Recipient, notification.Text, cancellationToken);
+
+        if (result.Success)
+        {
+            return SendResult.Ok();
+        }
+
+        return result.IsPermanentFailure
+            ? SendResult.Fail(result.Error, "Permanent")
+            : SendResult.Fail(result.Error, "Transient");
     }
 }

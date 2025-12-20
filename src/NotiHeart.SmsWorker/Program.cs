@@ -21,11 +21,14 @@ builder.Services.Configure<RabbitMqOptions>(
     builder.Configuration.GetSection(RabbitMqOptions.SectionName));
 builder.Services.Configure<NotificationProcessingOptions>(
     builder.Configuration.GetSection(NotificationProcessingOptions.SectionName));
+builder.Services.Configure<SmsSenderOptions>(
+    builder.Configuration.GetSection(SmsSenderOptions.SectionName));
 
 builder.Services.AddDbContext<NotificationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Notifications")));
 
 builder.Services.AddHostedService<SmsChannelWorker>();
+builder.Services.AddSingleton<ISmsSender, FakeSmsSender>();
 
 var host = builder.Build();
 
