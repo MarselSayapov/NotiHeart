@@ -8,9 +8,10 @@ public sealed class Notification
     public string CorrelationId { get; set; } = string.Empty;
     public NotificationChannel Channel { get; set; }
     public string Recipient { get; set; } = string.Empty;
-    public string Message { get; set; } = string.Empty;
+    public string Text { get; set; } = string.Empty;
     public string? Metadata { get; set; }
     public NotificationStatus Status { get; set; }
+    public string? LastError { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public ICollection<NotificationAttempt> Attempts { get; set; } = new List<NotificationAttempt>();

@@ -27,9 +27,10 @@ public sealed class NotificationsController : ControllerBase
     }
 
     [HttpPost]
+    [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(NotificationAcceptedResponse), StatusCodes.Status202Accepted)]
     public async Task<ActionResult<NotificationAcceptedResponse>> Create(
-        [FromBody] NotificationRequest request,
+        [FromForm] SendNotificationRequest request,
         CancellationToken cancellationToken)
     {
         var notificationId = Guid.NewGuid();
@@ -43,24 +44,33 @@ public sealed class NotificationsController : ControllerBase
             CorrelationId = correlationId,
             Channel = request.Channel,
             Recipient = request.Recipient,
-            Message = request.Message,
+            Text = request.Text,
             Metadata = metadata,
             Status = NotificationStatus.Pending,
             CreatedAt = now,
             UpdatedAt = now
         };
 
-        if (request.Attachments is { Count: > 0 })
+        if (request.Attachments is not null)
         {
             foreach (var attachment in request.Attachments)
             {
+                if (attachment.Length == 0)
+                {
+                    continue;
+                }
+
+                await using var stream = new MemoryStream();
+                await attachment.CopyToAsync(stream, cancellationToken);
+
                 notification.Attachments.Add(new NotificationAttachment
                 {
                     Id = Guid.NewGuid(),
                     NotificationId = notificationId,
                     FileName = attachment.FileName,
                     ContentType = attachment.ContentType,
-                    Content = attachment.Content
+                    Content = stream.ToArray(),
+                    Size = attachment.Length
                 });
             }
         }
@@ -68,12 +78,21 @@ public sealed class NotificationsController : ControllerBase
         _dbContext.Notifications.Add(notification);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        var envelope = new NotificationEnvelope(notificationId, request)
-        {
-            CorrelationId = correlationId
-        };
+        var attachmentIds = notification.Attachments.Select(item => item.Id).ToArray();
+        var dispatch = new NotificationDispatchMessage(
+            notificationId,
+            notification.Channel,
+            notification.Recipient,
+            notification.Text,
+            attachmentIds,
+            correlationId,
+            attempt: 1);
 
-        await _publisher.PublishAsync(envelope, cancellationToken);
+        await _publisher.PublishAsync(dispatch, cancellationToken);
+
+        notification.Status = NotificationStatus.Queued;
+        notification.UpdatedAt = DateTimeOffset.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Gateway accepted notification {NotificationId} {CorrelationId} for {Channel}.",
@@ -85,7 +104,7 @@ public sealed class NotificationsController : ControllerBase
             notificationId,
             correlationId,
             now,
-            NotificationStatus.Pending.ToString());
+            NotificationStatus.Queued.ToString());
 
         return Accepted(response);
     }

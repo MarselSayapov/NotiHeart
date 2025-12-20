@@ -32,6 +32,8 @@ public sealed class NotificationDbContext : DbContext
                 .HasDefaultValueSql("now() at time zone 'utc'");
             entity.Property(notification => notification.UpdatedAt)
                 .HasDefaultValueSql("now() at time zone 'utc'");
+            entity.HasIndex(notification => notification.Status);
+            entity.HasIndex(notification => notification.CreatedAt);
             entity.HasMany(notification => notification.Attempts)
                 .WithOne(attempt => attempt.Notification)
                 .HasForeignKey(attempt => attempt.NotificationId);
@@ -44,16 +46,18 @@ public sealed class NotificationDbContext : DbContext
         {
             entity.ToTable("notification_attempts");
             entity.HasKey(attempt => attempt.Id);
-            entity.Property(attempt => attempt.Status)
+            entity.Property(attempt => attempt.Result)
                 .HasConversion<string>();
-            entity.Property(attempt => attempt.Timestamp)
+            entity.Property(attempt => attempt.StartedAt)
                 .HasDefaultValueSql("now() at time zone 'utc'");
+            entity.HasIndex(attempt => attempt.NotificationId);
         });
 
         modelBuilder.Entity<NotificationAttachment>(entity =>
         {
             entity.ToTable("notification_attachments");
             entity.HasKey(attachment => attachment.Id);
+            entity.HasIndex(attachment => attachment.NotificationId);
         });
     }
 }

@@ -71,7 +71,7 @@ public sealed class PushChannelWorker : BackgroundService, IDisposable
             message.NotificationId,
             message.CorrelationId,
             message.Channel,
-            message.AttemptNo);
+            message.Attempt);
 
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
@@ -84,40 +84,44 @@ public sealed class PushChannelWorker : BackgroundService, IDisposable
             return;
         }
 
-        notification.Status = NotificationStatus.Processing;
+        notification.Status = NotificationStatus.Sending;
         notification.UpdatedAt = DateTimeOffset.UtcNow;
 
         var attempt = new NotificationAttempt
         {
             Id = Guid.NewGuid(),
             NotificationId = message.NotificationId,
-            AttemptNo = message.AttemptNo,
-            Status = NotificationStatus.Processing,
-            Timestamp = DateTimeOffset.UtcNow
+            AttemptNo = message.Attempt,
+            Result = NotificationStatus.Sending,
+            StartedAt = DateTimeOffset.UtcNow
         };
 
         var success = !notification.Recipient.Contains("fail", StringComparison.OrdinalIgnoreCase);
 
         if (success)
         {
-            attempt.Status = NotificationStatus.Delivered;
-            notification.Status = NotificationStatus.Delivered;
+            attempt.Result = NotificationStatus.Sent;
+            attempt.FinishedAt = DateTimeOffset.UtcNow;
+            notification.Status = NotificationStatus.Sent;
             notification.UpdatedAt = DateTimeOffset.UtcNow;
+            notification.LastError = null;
         }
         else
         {
-            attempt.Status = NotificationStatus.Failed;
+            attempt.Result = NotificationStatus.Failed;
             attempt.Error = "Simulated push delivery failure.";
+            attempt.FinishedAt = DateTimeOffset.UtcNow;
+            notification.LastError = attempt.Error;
 
-            if (message.AttemptNo < _processingOptions.MaxRetries)
+            if (message.Attempt < _processingOptions.MaxRetries)
             {
-                notification.Status = NotificationStatus.Retrying;
+                notification.Status = NotificationStatus.RetryScheduled;
                 notification.UpdatedAt = DateTimeOffset.UtcNow;
                 await ScheduleRetryAsync(message, cancellationToken);
             }
             else
             {
-                notification.Status = NotificationStatus.Failed;
+                notification.Status = NotificationStatus.Dead;
                 notification.UpdatedAt = DateTimeOffset.UtcNow;
             }
         }
@@ -130,8 +134,8 @@ public sealed class PushChannelWorker : BackgroundService, IDisposable
             message.NotificationId,
             message.CorrelationId,
             message.Channel,
-            message.AttemptNo,
-            attempt.Status);
+            message.Attempt,
+            attempt.Result);
 
         _channel.BasicAck(args.DeliveryTag, multiple: false);
     }
@@ -140,7 +144,7 @@ public sealed class PushChannelWorker : BackgroundService, IDisposable
     {
         await Task.Delay(TimeSpan.FromSeconds(_processingOptions.RetryDelaySeconds), cancellationToken);
 
-        var retryMessage = message with { AttemptNo = message.AttemptNo + 1 };
+        var retryMessage = message with { Attempt = message.Attempt + 1 };
         var payload = JsonSerializer.SerializeToUtf8Bytes(retryMessage);
         var properties = new BasicProperties { DeliveryMode = DeliveryModes.Persistent };
 

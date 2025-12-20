@@ -1,8 +1,10 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Http;
+using NotiHeart.Contracts;
 
-namespace NotiHeart.Contracts;
+namespace NotiHeart.Gateway.Models;
 
-public sealed class NotificationRequest
+public sealed class SendNotificationRequest
 {
     [Required]
     public NotificationChannel Channel { get; init; }
@@ -13,9 +15,9 @@ public sealed class NotificationRequest
 
     [Required]
     [MinLength(1)]
-    public string Message { get; init; } = string.Empty;
+    public string Text { get; init; } = string.Empty;
 
     public Dictionary<string, string>? Metadata { get; init; }
 
-    public IReadOnlyCollection<NotificationAttachmentRequest>? Attachments { get; init; }
+    public IReadOnlyCollection<IFormFile>? Attachments { get; init; }
 }

@@ -2,6 +2,9 @@ namespace NotiHeart.Contracts;
 
 public sealed record NotificationDispatchMessage(
     Guid NotificationId,
-    string CorrelationId,
     NotificationChannel Channel,
-    int AttemptNo);
+    string Recipient,
+    string Text,
+    Guid[] AttachmentIds,
+    string CorrelationId,
+    int Attempt);

@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using NotiHeart.Contracts;
@@ -28,15 +27,9 @@ public sealed class RabbitMqNotificationPublisher : INotificationPublisher, IDis
         _channel.ExchangeDeclare(_options.Exchange, ExchangeType.Direct, durable: true, autoDelete: false);
     }
 
-    public Task PublishAsync(NotificationEnvelope envelope, CancellationToken cancellationToken)
+    public Task PublishAsync(NotificationDispatchMessage dispatchMessage, CancellationToken cancellationToken)
     {
-        var dispatch = new NotificationDispatchMessage(
-            envelope.Id,
-            envelope.CorrelationId,
-            envelope.Request.Channel,
-            attemptNo: 1);
-
-        var payload = JsonSerializer.SerializeToUtf8Bytes(dispatch);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(dispatchMessage);
         var properties = new BasicProperties
         {
             DeliveryMode = DeliveryModes.Persistent
@@ -44,7 +37,7 @@ public sealed class RabbitMqNotificationPublisher : INotificationPublisher, IDis
 
         _channel.BasicPublish(
             exchange: _options.Exchange,
-            routingKey: NotificationRouting.GetRoutingKey(dispatch.Channel),
+            routingKey: NotificationRouting.GetRoutingKey(dispatchMessage.Channel),
             mandatory: false,
             basicProperties: properties,
             body: payload);
