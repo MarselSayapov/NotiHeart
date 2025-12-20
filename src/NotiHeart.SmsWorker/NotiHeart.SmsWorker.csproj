@@ -8,10 +8,13 @@
   <ItemGroup>
     <ProjectReference Include="..\NotiHeart.Contracts\NotiHeart.Contracts.csproj" />
     <ProjectReference Include="..\NotiHeart.Persistence\NotiHeart.Persistence.csproj" />
+    <ProjectReference Include="..\NotiHeart.WorkerBase\NotiHeart.WorkerBase.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="RabbitMQ.Client" Version="7.0.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.2" />
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.2" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
   </ItemGroup>
 </Project>
