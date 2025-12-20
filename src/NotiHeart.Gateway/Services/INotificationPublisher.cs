@@ -4,5 +4,5 @@ namespace NotiHeart.Gateway.Services;
 
 public interface INotificationPublisher
 {
-    Task PublishAsync(NotificationDispatchMessage dispatchMessage, CancellationToken cancellationToken);
+    Task<Task> PublishAsync(NotificationDispatchMessage dispatchMessage, CancellationToken cancellationToken);
 }

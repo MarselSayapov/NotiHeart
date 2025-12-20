@@ -7,6 +7,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Serilog;
 using Serilog.Context;
+using NotificationAttempt = NotiHeart.Persistence.NotificationAttempt;
 
 namespace NotiHeart.WorkerBase;
 
@@ -15,7 +16,7 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
     private readonly RabbitMqOptions _rabbitOptions;
     private readonly NotificationProcessingOptions _processingOptions;
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger _logger;
+    private readonly Serilog.ILogger _logger;
     private readonly IConnection _connection;
     private readonly IChannel _channel;
     private readonly string _queueName;
@@ -29,7 +30,7 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
         IOptions<RabbitMqOptions> rabbitOptions,
         IOptions<NotificationProcessingOptions> processingOptions,
         IServiceScopeFactory scopeFactory,
-        ILogger logger)
+        Serilog.ILogger logger)
     {
         Channel = channel;
         _rabbitOptions = rabbitOptions.Value;
@@ -45,8 +46,8 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
             Password = _rabbitOptions.Password
         };
 
-        _connection = factory.CreateConnection();
-        _channel = _connection.CreateChannel();
+        _connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
+        _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
 
         _routingKey = NotificationRouting.GetRoutingKey(channel);
         _queueName = NotificationRouting.GetQueueName(channel);
@@ -67,7 +68,7 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
             await HandleMessageAsync(args, stoppingToken);
         };
 
-        _channel.BasicConsume(_queueName, autoAck: false, consumer);
+        _channel.BasicConsumeAsync(_queueName, autoAck: false, consumer, cancellationToken: stoppingToken);
         return Task.CompletedTask;
     }
 
@@ -78,25 +79,29 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
 
     private void DeclareTopology()
     {
-        _channel.ExchangeDeclare(_rabbitOptions.Exchange, ExchangeType.Direct, durable: true, autoDelete: false);
-        _channel.ExchangeDeclare(_deadLetterExchange, ExchangeType.Direct, durable: true, autoDelete: false);
+        _channel.ExchangeDeclareAsync(_rabbitOptions.Exchange, ExchangeType.Direct, durable: true, autoDelete: false)
+            .GetAwaiter().GetResult();
+        _channel.ExchangeDeclareAsync(_deadLetterExchange, ExchangeType.Direct, durable: true, autoDelete: false)
+            .GetAwaiter().GetResult();
 
-        _channel.QueueDeclare(_deadLetterQueueName, durable: true, exclusive: false, autoDelete: false);
-        _channel.QueueBind(_deadLetterQueueName, _deadLetterExchange, _routingKey);
+        _channel.QueueDeclareAsync(_deadLetterQueueName, durable: true, exclusive: false, autoDelete: false)
+            .GetAwaiter().GetResult();
+        _channel.QueueBindAsync(_deadLetterQueueName, _deadLetterExchange, _routingKey)
+            .GetAwaiter().GetResult();
 
-        _channel.QueueDeclare(_queueName, durable: true, exclusive: false, autoDelete: false, arguments: new Dictionary<string, object>
+        _channel.QueueDeclareAsync(_queueName, durable: true, exclusive: false, autoDelete: false, arguments: new Dictionary<string, object>
         {
             ["x-dead-letter-exchange"] = _deadLetterExchange,
             ["x-dead-letter-routing-key"] = _routingKey
-        });
-        _channel.QueueBind(_queueName, _rabbitOptions.Exchange, _routingKey);
+        }!).GetAwaiter().GetResult();
+        _channel.QueueBindAsync(_queueName, _rabbitOptions.Exchange, _routingKey).GetAwaiter().GetResult();
 
-        _channel.QueueDeclare(_retryQueueName, durable: true, exclusive: false, autoDelete: false, arguments: new Dictionary<string, object>
+        _channel.QueueDeclareAsync(_retryQueueName, durable: true, exclusive: false, autoDelete: false, arguments: new Dictionary<string, object>
         {
             ["x-message-ttl"] = _processingOptions.RetryDelaySeconds * 1000,
             ["x-dead-letter-exchange"] = _rabbitOptions.Exchange,
             ["x-dead-letter-routing-key"] = _routingKey
-        });
+        }!).GetAwaiter().GetResult();
     }
 
     private static async Task<IReadOnlyCollection<NotificationAttachment>> LoadAttachmentsAsync(
@@ -119,7 +124,7 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
         var message = JsonSerializer.Deserialize<NotificationDispatchMessage>(args.Body.Span);
         if (message is null)
         {
-            _channel.BasicAck(args.DeliveryTag, multiple: false);
+            await _channel.BasicAckAsync(args.DeliveryTag, multiple: false, cancellationToken: cancellationToken);
             return;
         }
 
@@ -128,7 +133,7 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
         using (LogContext.PushProperty("Channel", message.Channel))
         using (LogContext.PushProperty("AttemptNo", message.Attempt))
         {
-            _logger.LogInformation("Processing notification message.");
+            _logger.Information("Processing notification message.");
 
             using var scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
@@ -137,8 +142,8 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
 
             if (notification is null)
             {
-                _logger.LogWarning("Notification not found.");
-                _channel.BasicAck(args.DeliveryTag, multiple: false);
+                _logger.Warning("Notification not found.");
+                await _channel.BasicAckAsync(args.DeliveryTag, multiple: false, cancellationToken: cancellationToken);
                 return;
             }
 
@@ -197,8 +202,8 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
             dbContext.NotificationAttempts.Add(attempt);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Completed notification processing.");
-            _channel.BasicAck(args.DeliveryTag, multiple: false);
+            _logger.Warning("Completed notification processing.");
+            await _channel.BasicAckAsync(args.DeliveryTag, multiple: false, cancellationToken: cancellationToken);
         }
     }
 
@@ -208,12 +213,12 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
         var payload = JsonSerializer.SerializeToUtf8Bytes(retryMessage);
         var properties = BuildProperties(retryMessage, errorType);
 
-        _channel.BasicPublish(
+        _channel.BasicPublishAsync(
             exchange: string.Empty,
             routingKey: _retryQueueName,
             mandatory: false,
             basicProperties: properties,
-            body: payload);
+            body: payload, cancellationToken: cancellationToken);
 
         return Task.CompletedTask;
     }
@@ -222,12 +227,14 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(message);
         var properties = BuildProperties(message, errorType);
-        _channel.BasicPublish(
+        _channel.BasicPublishAsync(
             exchange: _deadLetterExchange,
             routingKey: _routingKey,
             mandatory: false,
             basicProperties: properties,
-            body: payload);
+            body: payload)
+            .GetAwaiter()
+            .GetResult();
         return Task.CompletedTask;
     }
 
@@ -242,11 +249,11 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
                 ["x-correlation-id"] = message.CorrelationId,
                 ["x-notification-id"] = message.NotificationId.ToString(),
                 ["x-error-type"] = errorType
-            }
+            }!
         };
     }
 
-    public void Dispose()
+    public new void Dispose()
     {
         _channel.Dispose();
         _connection.Dispose();

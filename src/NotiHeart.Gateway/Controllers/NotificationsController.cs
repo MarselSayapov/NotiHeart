@@ -88,7 +88,7 @@ public sealed class NotificationsController : ControllerBase
             notification.Text,
             attachmentIds,
             correlationId,
-            attempt: 1);
+            Attempt: 1);
 
         await _publisher.PublishAsync(dispatch, cancellationToken);
 

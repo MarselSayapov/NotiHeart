@@ -13,8 +13,8 @@ Log.Logger = new LoggerConfiguration()
 
 var builder = Host.CreateApplicationBuilder(args);
 
-builder.Host.UseSerilog((context, services, configuration) =>
-    configuration.ReadFrom.Configuration(context.Configuration)
+builder.Services.AddSerilog((services, configuration) =>
+    configuration.ReadFrom.Configuration(builder.Configuration)
         .ReadFrom.Services(services));
 
 builder.Services.Configure<RabbitMqOptions>(

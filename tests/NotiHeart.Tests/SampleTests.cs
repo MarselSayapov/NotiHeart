@@ -1,3 +1,5 @@
+using Xunit;
+
 namespace NotiHeart.Tests;
 
 public sealed class SampleTests
