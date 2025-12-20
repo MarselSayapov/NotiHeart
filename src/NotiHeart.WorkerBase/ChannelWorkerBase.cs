@@ -71,7 +71,10 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
         return Task.CompletedTask;
     }
 
-    protected abstract Task<bool> SendAsync(Notification notification, CancellationToken cancellationToken);
+    protected abstract Task<SendResult> SendAsync(
+        Notification notification,
+        IReadOnlyCollection<NotificationAttachment> attachments,
+        CancellationToken cancellationToken);
 
     private void DeclareTopology()
     {
@@ -96,6 +99,21 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
         });
     }
 
+    private static async Task<IReadOnlyCollection<NotificationAttachment>> LoadAttachmentsAsync(
+        NotificationDbContext dbContext,
+        Guid[] attachmentIds,
+        CancellationToken cancellationToken)
+    {
+        if (attachmentIds.Length == 0)
+        {
+            return Array.Empty<NotificationAttachment>();
+        }
+
+        return await dbContext.NotificationAttachments
+            .Where(attachment => attachmentIds.Contains(attachment.Id))
+            .ToListAsync(cancellationToken);
+    }
+
     private async Task HandleMessageAsync(BasicDeliverEventArgs args, CancellationToken cancellationToken)
     {
         var message = JsonSerializer.Deserialize<NotificationDispatchMessage>(args.Body.Span);
@@ -115,7 +133,6 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
             using var scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<NotificationDbContext>();
             var notification = await dbContext.Notifications
-                .Include(item => item.Attachments)
                 .FirstOrDefaultAsync(item => item.Id == message.NotificationId, cancellationToken);
 
             if (notification is null)
@@ -137,9 +154,18 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
                 StartedAt = DateTimeOffset.UtcNow
             };
 
-            var success = await SendAsync(notification, cancellationToken);
+            var attachments = await LoadAttachmentsAsync(dbContext, message.AttachmentIds, cancellationToken);
+            SendResult sendResult;
+            try
+            {
+                sendResult = await SendAsync(notification, attachments, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                sendResult = new SendResult(false, ex.Message, "Transient");
+            }
 
-            if (success)
+            if (sendResult.Success)
             {
                 attempt.Result = NotificationStatus.Sent;
                 attempt.FinishedAt = DateTimeOffset.UtcNow;
@@ -150,7 +176,7 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
             else
             {
                 attempt.Result = NotificationStatus.Failed;
-                attempt.Error = "Mock send failed.";
+                attempt.Error = sendResult.Error ?? "Send failed.";
                 attempt.FinishedAt = DateTimeOffset.UtcNow;
                 notification.LastError = attempt.Error;
 
@@ -158,7 +184,7 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
                 {
                     notification.Status = NotificationStatus.RetryScheduled;
                     notification.UpdatedAt = DateTimeOffset.UtcNow;
-                    await ScheduleRetryAsync(message, cancellationToken, "Transient");
+                    await ScheduleRetryAsync(message, cancellationToken, sendResult.ErrorType);
                 }
                 else
                 {
@@ -225,4 +251,10 @@ public abstract class ChannelWorkerBase : BackgroundService, IDisposable
         _channel.Dispose();
         _connection.Dispose();
     }
+}
+
+public sealed record SendResult(bool Success, string? Error, string ErrorType)
+{
+    public static SendResult Ok() => new(true, null, "None");
+    public static SendResult Fail(string? error, string errorType = "Transient") => new(false, error, errorType);
 }

@@ -8,17 +8,24 @@ namespace NotiHeart.EmailWorker;
 
 public sealed class EmailChannelWorker : ChannelWorkerBase
 {
+    private readonly IEmailSender _emailSender;
+
     public EmailChannelWorker(
         IOptions<RabbitMqOptions> rabbitOptions,
         IOptions<NotificationProcessingOptions> processingOptions,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        IEmailSender emailSender)
         : base(NotificationChannel.Email, rabbitOptions, processingOptions, scopeFactory, Log.Logger.ForContext<EmailChannelWorker>())
     {
+        _emailSender = emailSender;
     }
 
-    protected override Task<bool> SendAsync(Notification notification, CancellationToken cancellationToken)
+    protected override async Task<SendResult> SendAsync(
+        Notification notification,
+        IReadOnlyCollection<NotificationAttachment> attachments,
+        CancellationToken cancellationToken)
     {
-        var shouldFail = notification.Recipient.Contains("fail", StringComparison.OrdinalIgnoreCase);
-        return Task.FromResult(!shouldFail);
+        var success = await _emailSender.SendAsync(notification.Recipient, notification.Text, attachments, cancellationToken);
+        return success ? SendResult.Ok() : SendResult.Fail("Temporary email failure", "Transient");
     }
 }

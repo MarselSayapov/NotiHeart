@@ -16,9 +16,14 @@ public sealed class SmsChannelWorker : ChannelWorkerBase
     {
     }
 
-    protected override Task<bool> SendAsync(Notification notification, CancellationToken cancellationToken)
+    protected override Task<SendResult> SendAsync(
+        Notification notification,
+        IReadOnlyCollection<NotificationAttachment> attachments,
+        CancellationToken cancellationToken)
     {
         var shouldFail = notification.Recipient.Contains("fail", StringComparison.OrdinalIgnoreCase);
-        return Task.FromResult(!shouldFail);
+        return Task.FromResult(shouldFail
+            ? SendResult.Fail("Mock SMS failure", "Transient")
+            : SendResult.Ok());
     }
 }
