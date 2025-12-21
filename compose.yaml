@@ -1,7 +1,131 @@
 ﻿services:
-  notiheart:
-    image: notiheart
+  gateway:
+    image: notiheart-gateway
     build:
       context: .
       dockerfile: NotiHeart/Dockerfile
+    environment:
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=notiheart;Username=noti;Password=noti
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: guest
+      RabbitMq__Password: guest
+      RabbitMq__VirtualHost: /
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
+  emailworker:
+    image: notiheart-emailworker
+    build:
+      context: .
+      dockerfile: EmailWorker/Dockerfile
+    environment:
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=notiheart;Username=noti;Password=noti
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: guest
+      RabbitMq__Password: guest
+      RabbitMq__VirtualHost: /
+      RabbitMq__QueueName: notifications.email.q
+      RabbitMq__RetryQueueName: notifications.email.retry.q
+      RabbitMq__DeadLetterQueueName: notifications.email.dlq
+      RabbitMq__RoutingKey: email
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "dotnet", "--info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  smsworker:
+    image: notiheart-smsworker
+    build:
+      context: .
+      dockerfile: SmsWorker/Dockerfile
+    environment:
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=notiheart;Username=noti;Password=noti
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: guest
+      RabbitMq__Password: guest
+      RabbitMq__VirtualHost: /
+      RabbitMq__QueueName: notifications.sms.q
+      RabbitMq__RetryQueueName: notifications.sms.retry.q
+      RabbitMq__DeadLetterQueueName: notifications.sms.dlq
+      RabbitMq__RoutingKey: sms
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "dotnet", "--info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  pushworker:
+    image: notiheart-pushworker
+    build:
+      context: .
+      dockerfile: PushWorker/Dockerfile
+    environment:
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=notiheart;Username=noti;Password=noti
+      RabbitMq__HostName: rabbitmq
+      RabbitMq__Port: 5672
+      RabbitMq__UserName: guest
+      RabbitMq__Password: guest
+      RabbitMq__VirtualHost: /
+      RabbitMq__QueueName: notifications.push.q
+      RabbitMq__RetryQueueName: notifications.push.retry.q
+      RabbitMq__DeadLetterQueueName: notifications.push.dlq
+      RabbitMq__RoutingKey: push
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "dotnet", "--info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: noti
+      POSTGRES_PASSWORD: noti
+      POSTGRES_DB: notiheart
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noti -d notiheart"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

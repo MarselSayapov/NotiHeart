@@ -1,6 +1,12 @@
 @NotiHeart_HostAddress = http://localhost:5296
 
-GET {{NotiHeart_HostAddress}}/weatherforecast/
-Accept: application/json
+### Send notification (multipart/form-data)
+# curl -X POST "{{NotiHeart_HostAddress}}/api/notifications/send" \
+#   -H "X-Correlation-Id: demo-corr-123" \
+#   -F "channel=Email" \
+#   -F "recipient=user@example.com" \
+#   -F "text=Hello from NotiHeart" \
+#   -F "attachments=@./sample.pdf"
 
-###
+### Get notification status
+# curl "{{NotiHeart_HostAddress}}/api/notifications/00000000-0000-0000-0000-000000000000"
