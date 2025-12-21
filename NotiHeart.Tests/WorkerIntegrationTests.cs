@@ -1,3 +1,4 @@
+using System;
 using EmailWorker;
 using EmailWorker.Data;
 using EmailWorker.Messaging;
@@ -10,6 +11,7 @@ using Npgsql;
 using RabbitMQ.Client;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace NotiHeart.Tests;
@@ -24,7 +26,7 @@ public sealed class WorkerIntegrationTests(TestcontainersFixture fixture)
     {
         var notificationId = await SeedNotificationAsync();
 
-        await using var host = BuildWorkerHost();
+        using var host = BuildWorkerHost();
         await host.StartAsync();
 
         PublishMessage(notificationId);

@@ -26,7 +26,7 @@ builder.Services.AddSingleton<ISmsSender, FakeSmsSender>();
 builder.Services.AddSerilog((context, loggerConfiguration) =>
 {
     loggerConfiguration
-        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Configuration(builder.Configuration)
         .Enrich.FromLogContext()
         .WriteTo.Console();
 });

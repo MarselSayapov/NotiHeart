@@ -3,8 +3,13 @@ using NotiHeart.Models;
 
 namespace NotiHeart.Data;
 
-public sealed class NotificationDbContext(DbContextOptions<NotificationDbContext> options) : DbContext(options)
+public sealed class NotificationDbContext : DbContext
 {
+    public NotificationDbContext(DbContextOptions<NotificationDbContext> options) : base(options)
+    {
+        Database.EnsureCreated();
+    }
+
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<NotificationAttachment> NotificationAttachments => Set<NotificationAttachment>();
     public DbSet<NotificationAttempt> NotificationAttempts => Set<NotificationAttempt>();
